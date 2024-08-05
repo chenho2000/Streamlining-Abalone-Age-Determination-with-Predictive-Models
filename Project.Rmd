@@ -1,0 +1,1078 @@
+---
+title: "STAT844 Final Project"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r, eval=FALSE, message=FALSE, warning=FALSE}
+#Run these commands to intall all the required packages for this reportt
+install.packages("AppliedPredictiveModeling")
+install.packages("readr")
+install.packages("dplyr")
+install.packages("car")
+install.packages("lmtest")
+install.packages("ggplot2")
+install.packages("GGally")
+install.packages("NeuralNetTools")
+install.packages("rattle")
+install.packages("nnet")
+install.packages("gridExtra")
+install.packages("e1071")
+install.packages("MASS")
+install.packages("leaps")
+install.packages("glmnet")
+install.packages("caret")
+install.packages("gbm")
+install.packages(c('neuralnet','keras','tensorflow'),dependencies = T)
+install.packages("FactoMineR")
+install.packages("FNN")
+install.packages("factoextra")
+install.packages("mgcv")
+install.packages("gamair")
+```
+
+
+```{r Installing/Loading Packages, message=FALSE, warning=FALSE}
+#loading all necessary packages 
+library(AppliedPredictiveModeling)
+library(neuralnet)
+library(keras)
+library(NeuralNetTools)
+library(tensorflow)
+library(tidyverse)
+library(neuralnet)
+library(readr)
+library(dplyr)
+library(car)
+library(lmtest)
+library(mgcv)
+library(gamair)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+library(rattle)
+library(GGally)
+library(gridExtra)
+library(MASS)
+library(e1071)
+library(leaps)
+library(glmnet)
+library(caret)
+library(nnet)
+library(FNN)
+library(gbm)
+library(FactoMineR)
+library(factoextra)
+library(dplyr)
+library(broom)
+library(tune)
+```
+
+
+
+```{r}
+# Abalone Data
+set.seed(844)
+data(abalone)
+
+dim(abalone)
+summary(abalone)
+```
+```{r}
+abalone$OtherWeight <- abalone$WholeWeight - (abalone$VisceraWeight + abalone$ShuckedWeight + abalone$ShellWeight)
+summary(abalone$OtherWeight)
+```
+
+
+
+
+
+```{r}
+head(abalone[abalone$Height == 0,])
+head(abalone[abalone$OtherWeight < 0,])
+summary(abalone)
+```
+
+
+```{r}
+abalone = abalone[abalone$Height != 0,]
+abalone = abalone[abalone$OtherWeight >= 0,]
+```
+
+Multivariate Analysis:
+```{r}
+ggpairs(abalone, aes(colour = Type), title="Relational Matrix")
+```
+
+
+Univariate Analysis:
+```{r}
+ggplot(abalone, aes(x = LongestShell)) +
+  geom_histogram(bins = 30, color = "black") +
+  labs(title = "Histogram of Longest Shell Measurement", x = "Longest Shell (mm)", y = "Frequency") +
+  theme_minimal()
+
+ggplot(abalone, aes(x = Diameter)) +
+  geom_histogram(bins = 30, color = "black") +
+  labs(title = "Histogram of Diameter Measurement", x = "Diameter (mm)", y = "Frequency") +
+  theme_minimal()
+
+ggplot(abalone, aes(x = Height)) +
+  geom_histogram(bins = 30, color = "black") +
+  labs(title = "Histogram of Height Measurement", x = "Height (mm)", y = "Frequency") +
+  theme_minimal()
+```
+```{r}
+ggplot(abalone, aes(x = WholeWeight)) +
+  geom_histogram(bins = 30, color = "black") +
+  labs(title = "Histogram of Whole Weight", x = "Whole Weight (grams)", y = "Frequency") +
+  theme_minimal()
+
+ggplot(abalone, aes(x = ShuckedWeight)) +
+  geom_histogram(bins = 30, color = "black") +
+  labs(title = "Histogram of Shucked Weight", x = "Shucked Weight (grams)", y = "Frequency") +
+  theme_minimal()
+
+ggplot(abalone, aes(x = VisceraWeight)) +
+  geom_histogram(bins = 30, color = "black") +
+  labs(title = "Histogram of Viscera Weight", x = "Viscera Weight (grams)", y = "Frequency") +
+  theme_minimal()
+
+ggplot(abalone, aes(x = ShellWeight)) +
+  geom_histogram(bins = 30, color = "black") +
+  labs(title = "Histogram of Shell Weight", x = "Shell Weight (grams)", y = "Frequency") +
+  theme_minimal()
+```
+
+
+
+
+
+
+
+```{r, echo=FALSE}
+#Function to calculate RMSE
+rmse <-  function(actual, predicted) {
+  sqrt(mean((actual - predicted) ^ 2))
+}
+
+#high leverage points
+calculate_leverage <- function(model){
+  (hatvalues(model) > 2 * mean(hatvalues(model)))
+}
+
+#large residuals
+calculated_residuales <- function(model){
+  (abs(rstandard(model)) > 2)
+}
+
+#influential points
+calculate_influence <- function(model){
+  sum(cooks.distance(model) > 4 / length(cooks.distance(model)))
+}
+
+#Function for boxplot
+create_boxplot <- function(xvar,yvar,xtitle,ytitle){ 
+  ggplot(abalone, aes(x=xvar,y=yvar, fill=Type))+
+  geom_boxplot() + 
+  xlab(paste(xtitle)) +  
+  ylab(paste(ytitle))
+}
+
+#function for density plots
+create_den_plots <- function(xvar, title){
+  ggplot(abalone, aes(x = xvar, fill = Type)) + 
+    geom_density(alpha = 0.8) + 
+    ylab("Number of abalone") + 
+    ggtitle(paste(title)) + 
+    xlab("Type") 
+    #facet_wrap(~Type, ncol = 3)
+}
+
+#variable added plot
+create_varplot <- function(big_model, small_model){
+plot(resid(big_model) ~ resid(small_model), 
+     col = "dodgerblue", pch = 20,
+     xlab = "Residuals, Added Predictor", 
+     ylab = "Residuals, Original Model")
+abline(h = 0, lty = 2)
+abline(v = 0, lty = 2)
+abline(lm(resid(big_model) ~ resid(small_model)),
+       col = "darkorange", lwd = 2)
+}
+
+#Scatter plots 
+create_scatter_plot <- function(xvar,yvar,xtitle,ytitle) {
+  ggplot(abalone_train,aes(x=xvar,y=yvar, col=Type)) + 
+    geom_point() + 
+    geom_jitter() + 
+    xlab(paste(xtitle)) +  
+    ylab(paste(ytitle))
+}
+#fitted vs residuals plots
+create_fitted_residuals <- function(model,name){
+plot(fitted(model), resid(model), 
+    xlab = "Fitted Values", ylab = "Residuals", main = paste("Residuals vs fitted values (",name,")"))
+abline(h = 0, col = "red", lty = "dashed")
+}
+
+#normal q-q plot
+create_qq_normal <- function(model,name){
+  qqnorm(resid(model), main = paste("QQ Plot (",name,")"))
+  qqline(resid(model), col = "red", lty = "dashed")
+}
+
+
+compare_rmse <- function(model,name){
+  abalone_add_train_rmse <- rmse(abalone_train$Rings, predict(model,abalone_train))
+  abalone_add_test_rmse <- rmse(abalone_test$Rings, predict(model,abalone_test))
+  result <- data.frame('Model'=c(name),"Training RMSE"=c(abalone_add_train_rmse),"Testing RMSE"=c(abalone_add_test_rmse))
+}
+
+
+log_rmse <- function(model,name){
+  abalone_add_train_rmse  <- sqrt(mean((abalone_train$Rings - exp(fitted(model))) ^2))
+  abalone_add_test_rmse <- sqrt(mean((abalone_test$Rings - exp(predict(model, newdata=abalone_test))) ^ 2))
+  result <- data.frame('Model'=c(name),"RMSE Train"=c(abalone_add_train_rmse),"RMSE Test"=c(abalone_add_test_rmse))
+}
+
+
+get_log_rmse <- function(model){
+  abalone_add_train_rmse <- sqrt(mean((abalone_train$Rings - exp(fitted(model))) ^2))
+  abalone_add_test_rmse <- sqrt(mean((abalone_test$Rings - exp(predict(model, newdata=abalone_test))) ^ 2))
+  data.frame(train=abalone_add_train_rmse,test=abalone_add_test_rmse)
+}
+
+get_log_rmse_obs <- function(model,train_data){
+  abalone_add_train_rmse <- sqrt(mean((train_data$Rings - exp(fitted(model))) ^2))
+  abalone_add_test_rmse <- sqrt(mean((abalone_test$Rings - exp(predict(model, newdata=abalone_test))) ^ 2))
+  data.frame(train=abalone_add_train_rmse,test=abalone_add_test_rmse)
+}
+
+model_assumptions <- function(model,name){
+  create_fitted_residuals(model,name)
+  create_qq_normal(model,name)
+}
+
+test_model <- function(degree){
+    model <-  lm(Rings~ Type + poly( LongestShell , 1 ) + poly( Diameter , 1 ) + poly( Height , degree ) + poly( WholeWeight , degree ) + poly( ShuckedWeight , degree ) + poly( VisceraWeight , degree ) + poly( ShellWeight , degree ), data=abalone_train)
+    model
+}
+
+test_int_model <- function(d){
+  model <- lm(log(Rings) ~ LongestShell + Height + Diameter + poly(WholeWeight, d) +
+  poly(VisceraWeight, d) + poly(ShuckedWeight,d) + poly(ShellWeight, d) + Type + Diameter:poly(ShuckedWeight, d) + poly(ShuckedWeight,  d):Type, data=abalone_train)
+  model
+}
+
+
+find_leverage <- function(model){
+  return (which(hatvalues(model) > 2 * mean(hatvalues(model))))
+}
+
+find_outliers <- function(model){
+  which(abs(rstandard(model)) > 2)
+}
+
+find_influence <- function(model){
+ which(cooks.distance(model)> 4 / length(cooks.distance(model)))
+}
+
+get_best_result <- function(caret_fit) {
+  best_result <- caret_fit$results[as.numeric(rownames(caret_fit$bestTune)), ]
+  rownames(best_result) <- NULL
+  best_result
+}
+
+get_rmse <- function(model){
+  abalone_add_train_rmse <- sqrt(mean((abalone_train$Rings - (fitted(model))) ^2))
+  abalone_add_test_rmse <- sqrt(mean((abalone_test$Rings - (predict(model, newdata=abalone_test))) ^ 2))
+  data.frame(train=abalone_add_train_rmse,test=abalone_add_test_rmse)
+}
+
+```
+
+
+####Train & Test Split
+```{r, message=FALSE, warning=FALSE}
+#Splitting dataset in train and test using 80/20 method
+abalone <- abalone[, -which(names(abalone) == "OtherWeight")]
+indexes <- sample(1:nrow(abalone), size = 0.2 * nrow(abalone))
+abalone_train <- abalone[-indexes,]
+abalone_train$Type = as.numeric(abalone_train$Type)
+abalone_test <- abalone[indexes,]
+abalone_test$Type = as.numeric(abalone_test$Type)
+```
+
+PCA: 
+```{r}
+standardized_data <- scale(abalone_train[, -which(names(abalone_train) == "Rings")])
+PCA = prcomp(standardized_data)
+print(summary(PCA))
+
+plot(summary(PCA)$importance[2,1:8], ylab="Proportion of Variance", type="l", main="Proportion of Variance Plot")
+```
+```{r}
+# Extract the first ten principal components
+first_three_pcs <- as.data.frame(PCA $x[, 1:3])
+
+# Build a linear model using the first ten principal components
+lm_model <- lm(abalone_train$Rings~ ., data = first_three_pcs )
+
+# Print the summary of the linear model
+summary(lm_model)
+print(sqrt(mean((abalone_train$Rings - predict(lm_model, first_three_pcs))^2)))
+
+standardized_data_test <- scale(abalone_test[, -which(names(abalone_test) == "Rings")])
+PCA_test = prcomp(standardized_data_test)
+print(summary(PCA_test))
+first_three_pcs_test <- as.data.frame(PCA_test $x[, 1:3])
+print(sqrt(mean((abalone_test$Rings - predict(lm_model, first_three_pcs_test))^2)))
+```
+Use best subsets regression with the Adjusted R-squared criterion:
+```{r}
+
+regsubsetsObj <- regsubsets(abalone_train$Rings~., data=abalone_train)
+print(summary(regsubsetsObj))
+
+coef_list = coef(regsubsetsObj,8)
+print(coef_list)
+```
+```{r}
+
+num_bs=seq(1,8,by = 1)
+train_bs_rmse=rep(0,length(num_bs))
+test_bs_rmse=rep(0,length(num_bs))
+
+regbest8 <- lm(abalone_train$Rings~., data = abalone_train)
+result_8 = compare_rmse(regbest8,"Best Subset Regression with 8 variable")
+print(result_8)
+train_bs_rmse[8]=result_8$Training.RMSE
+test_bs_rmse[8]=result_8$Testing.RMSE
+faraway::vif(regbest8)
+
+regbest7 <- lm(abalone_train$Rings~ Type + Diameter + Height + WholeWeight + ShuckedWeight + VisceraWeight + ShellWeight, data = abalone_train)
+result_7 = compare_rmse(regbest7,"Best Subset Regression with 7 variable")
+print(result_7)
+train_bs_rmse[7]=result_7$Training.RMSE
+test_bs_rmse[7]=result_7$Testing.RMSE
+faraway::vif(regbest7)
+
+regbest6 <- lm(abalone_train$Rings~ Diameter + Height + WholeWeight + ShuckedWeight + VisceraWeight + ShellWeight, data = abalone_train)
+result_6 = compare_rmse(regbest6,"Best Subset Regression with 6 variable")
+print(result_6)
+train_bs_rmse[6]=result_6$Training.RMSE
+test_bs_rmse[6]=result_6$Testing.RMSE
+faraway::vif(regbest6)
+
+regbest5 <- lm(abalone_train$Rings~ Diameter + Height + WholeWeight + ShuckedWeight + VisceraWeight, data = abalone_train)
+result_5 = compare_rmse(regbest5,"Best Subset Regression with 5 variable")
+print(result_5)
+train_bs_rmse[5]=result_5$Training.RMSE
+test_bs_rmse[5]=result_5$Testing.RMSE
+faraway::vif(regbest5)
+
+regbest4 <- lm(abalone_train$Rings~ Diameter + WholeWeight + ShuckedWeight + VisceraWeight, data = abalone_train)
+result_4 = compare_rmse(regbest4,"Best Subset Regression with 4 variable")
+print(result_4)
+train_bs_rmse[4]=result_4$Training.RMSE
+test_bs_rmse[4]=result_4$Testing.RMSE
+faraway::vif(regbest4)
+
+regbest3 <- lm(abalone_train$Rings~ Diameter + WholeWeight + ShuckedWeight, data = abalone_train)
+result_3 = compare_rmse(regbest3,"Best Subset Regression with 3 variable")
+print(result_3)
+train_bs_rmse[3]=result_3$Training.RMSE
+test_bs_rmse[3]=result_3$Testing.RMSE
+faraway::vif(regbest3)
+
+regbest2 <- lm(abalone_train$Rings~ ShuckedWeight + ShellWeight, data = abalone_train)
+result_2 = compare_rmse(regbest2,"Best Subset Regression with 2 variable")
+print(result_2)
+train_bs_rmse[2]=result_2$Training.RMSE
+test_bs_rmse[2]=result_2$Testing.RMSE
+faraway::vif(regbest2)
+
+regbest1 <- lm(abalone_train$Rings~ ShellWeight, data = abalone_train)
+result_1 = compare_rmse(regbest1,"Best Subset Regression with 1 variable")
+print(result_1)
+train_bs_rmse[1]=result_1$Training.RMSE
+test_bs_rmse[1]=result_1$Testing.RMSE
+faraway::vif(regbest1)
+
+
+```
+```{r}
+plot(1:length(train_bs_rmse), train_bs_rmse, type = "l", col = "blue", lwd = 2, 
+     xlab = "Number of Variables", ylab = "RMSE",
+     main = "Best Subset Regression Train vs Test RMSE")
+lines(1:length(train_bs_rmse), test_bs_rmse, col = "red", lwd = 2)
+legend("topright", legend = c("Train RMSE", "Test RMSE"), 
+       col = c("blue", "red"), lwd = 2, cex = 0.8, bty = "n")
+```
+
+
+
+```{r}
+abalone_add <- lm(Rings ~.,data = abalone_train)
+summary(abalone_add)
+```
+```{r}
+PLOTTEXTSIZE = 2
+plot(residuals(abalone_add ) ~ fitted(abalone_add ), pch = 20,
+  main = "Residual plot, linear model", 
+  xlab = "Residuals", ylab = "Fitted values",
+  cex.main = PLOTTEXTSIZE, cex.lab = PLOTTEXTSIZE, cex.axis = PLOTTEXTSIZE
+)
+abline(h = 0, col = "red", lty = "dashed")
+```
+
+
+
+
+
+- In first additive model, note that factor level **female** is reference level for `Type` variable.
+
+- After fitting the additive model with all predictors we can see that test statistics showing all variables as significant except `LongestShell`. As we saw previously from pairs plot that `LongestShell` and `Diameter` predictors are highly correlated. We also see that different weights predictors are also significant even though they should be linear function of each other. 
+
+####RMSE Score:
+
+```{r}
+print(compare_rmse(abalone_add,"Linear Model"))
+```
+
+####Multicollinearity:
+
+- We will calculate **variance inflation factor** in order to find presence of Multicollinearity issue with the dataset.
+```{r}
+faraway::vif(abalone_add)
+```
+
+- We can see that `Diameter` and `LongestShell` are highly correlated with each other. We will remove `LongestShell` from the model as it's not significant and check the model again.
+- We will also remove `WholeWeight` from the model as they are linear function of other predictors.
+
+```{r}
+abalone_add_small <- lm(Rings ~ Type + Height + Diameter+ ShuckedWeight + VisceraWeight + ShellWeight,data = abalone_train)
+```
+
+```{r}
+faraway::vif(abalone_add_small)
+```
+
+- After removing the multicollinearity issue, we can see that all the variables are significant in the model.
+```{r}
+print(compare_rmse(abalone_add_small,"Additive Small Model"))
+```
+```{r}
+anova(abalone_add_small,abalone_add)
+```
+
+```{r}
+#Running AIC and BIC on additive model
+abalone_model_add_aic <- step(abalone_add, direction="backward", trace=0)
+summary(abalone_model_add_aic)
+
+n <- length(resid(abalone_add))
+abalone_model_add_bic <- step(abalone_add, direction="backward", k=log(n), trace=0)
+summary(abalone_model_add_bic)
+```
+
+
+
+- We ran `AIC` AND `BIC` method using best model (`abalone_add`) from the previous Anova F Test. both `AIC` and `BIC` selected the same model without the `LongestShell` predictor.
+
+- We selected the model from `AIC` (Since both models are same) and will plot fitted vs residuals and qq normal plots. 
+```{r}
+print(compare_rmse(abalone_model_add_aic,"Linear Model AIC"))
+print(compare_rmse(abalone_model_add_bic,"Linear Model BIC"))
+```
+```{r}
+faraway::vif(abalone_model_add_aic)
+faraway::vif(abalone_model_add_bic)
+
+```
+
+
+
+```{r, message=FALSE, warning=FALSE}
+model_assumptions(abalone_model_add_aic,"Linear Model AIC ")
+```
+
+
+####Polynomial Regression:
+
+
+
+
+- we will use a loop to find out which variable will perform better if it has a degree more than 1
+
+
+
+```{r echo=TRUE}
+abalone_add_poly2 <-lm(Rings ~ Type + poly( LongestShell , 1 ) + poly( Diameter , 1 ) + poly( Height , 2 ) + poly( WholeWeight , 2 ) + poly( ShuckedWeight , 2 ) + poly( VisceraWeight , 2 ) + poly( ShellWeight , 2 ), data=abalone_train)
+print(compare_rmse(abalone_add_poly2,"Polynomial Regression with degree of 2"))
+model_assumptions(abalone_add_poly2,"Polynomial Regression with degree of 2")
+```
+
+lets try to fit another model with degree of 3 and check the significance.
+
+```{r, message=FALSE, warning=FALSE}
+abalone_add_poly3 <- lm(Rings ~ Type + poly( LongestShell , 1 ) + poly( Diameter , 1 ) + poly( Height , 3 ) + poly( WholeWeight , 3 ) + poly( ShuckedWeight , 3 ) + poly( VisceraWeight , 3 ) + poly( ShellWeight , 3 ), data=abalone_train)
+```
+
+#### RMSE Score
+```{r}
+print(compare_rmse(abalone_add_poly3,"Polynomial Regression with degree of 3"))
+```
+#### ANOVA *F* Test
+```{r}
+anova(abalone_add_poly2,abalone_add_poly3)
+```
+
+
+- *F* test has low p-value suggesting that transformation with degree 3 is significant and we saw that rmse went down compare to polynomial model with degree 2. Lets try to fit the model of degree 4 and check the significance.
+
+```{r, fig.height=5, fig.width=10, message=FALSE, warning=FALSE}
+abalone_add_poly4 <- lm(Rings ~ Type + poly( LongestShell , 1 ) + poly( Diameter , 1 ) + poly( Height , 4 ) + poly( WholeWeight , 4 ) + poly( ShuckedWeight , 4 ) + poly( VisceraWeight , 4) + poly( ShellWeight , 4 ), data=abalone_train)
+```
+
+
+#### RMSE Score
+```{r}
+print(compare_rmse(abalone_add_poly4,"Polynomial Regression with degree of 4"))
+```
+#### ANOVA *F* Test
+```{r}
+anova(abalone_add_poly3,abalone_add_poly4)
+```
+
+```{r}
+abalone_add_poly5 <- lm(Rings ~ Type + poly( LongestShell , 1 ) + poly( Diameter , 1 ) + poly( Height , 5 ) + poly( WholeWeight , 5 ) + poly( ShuckedWeight , 5 ) + poly( VisceraWeight , 5) + poly( ShellWeight , 5 ), data=abalone_train)
+anova(abalone_add_poly4,abalone_add_poly5)
+```
+
+
+
+
+
+
+
+
+```{r}
+num_poly=seq(1,10,by = 1)
+train_rmse=rep(0,length(num_poly))
+test_rmse=rep(0,length(num_poly))
+
+for(d in num_poly){
+  abalone_add_poly=test_model(d)  
+  current=compare_rmse(abalone_add_poly, "test")
+  train_rmse[d]=current$Training.RMSE
+  test_rmse[d]=current$Testing.RMSE
+}
+```
+
+```{r Fig5, echo=TRUE}
+plot(1:length(train_rmse), train_rmse, type = "l", col = "blue", lwd = 2, 
+     xlab = "Model Complexity", ylab = "RMSE",
+     main = "Polynomial Regression Train vs Test RMSE")
+
+# Add the test RMSE line
+lines(1:length(train_rmse), test_rmse, col = "red", lwd = 2)
+
+# Add a legend
+legend("topright", legend = c("Train RMSE", "Test RMSE"), 
+       col = c("blue", "red"), lwd = 2, cex = 0.8, bty = "n")
+```
+- We can see that the test RMSE is lowest at degree 4 and then starts to increase. This suggests that the model is overfitting after degree 4.
+
+### AIC and BIC on poly additive model:
+- Since we have selected the model lets run `AIC` and `BIC` method to select appropriate model further.
+
+```{r}
+abalone_model_add_aic <- step(abalone_add_poly4, direction="backward", trace=FALSE)
+
+n <- length(resid(abalone_add_poly4))
+abalone_model_add_bic <- step(abalone_add_poly4, direction="backward", k=log(n), trace=FALSE)
+```
+
+####Compare AIC vs BIC Model Parameters
+
+```{r}
+abalone_model_add_aic$call[2]
+abalone_model_add_bic$call[2]
+
+```
+- 'AIC' model selected `LongestShell` and `HDiameter` as significant predictors but 'BIC' model does not have these predictors.
+
+####Anove F Test
+```{r}
+anova(abalone_model_add_bic,abalone_model_add_aic)
+```
+####Model Assumptions (AIC & BIC):
+
+```{r}
+model_assumptions(abalone_model_add_aic,"Polynomial Regression with degree of 4 AIC")
+```
+
+
+```{r}
+model_assumptions(abalone_model_add_bic,"Polynomial Regression with degree of 4 BIC")
+```
+
+- Both constant variance and normality looks good in this case.
+
+#### RMSE Score - AIC
+
+```{r}
+print(compare_rmse(abalone_model_add_aic,paste("Polynomial Regression with degree of 4 AIC ")))
+```
+
+
+#### RMSE Score - BIC
+
+```{r}
+print(compare_rmse(abalone_model_add_bic,paste("Polynomial Regression with degree of 4 BIC ")))
+```
+
+
+- After doing variable selection using `AIC` and `BIC`, we selected the model from `BIC` and checked the t statistics and assumptions. Interestingly `BIC` model is dropping few predictors but also has similar test RMSE as original model we started with (model with polynomial degree of 4). Which suggests that we could drop some of the variables and still maintain lower RMSE. This bring us to the next modification and introduction of interaction terms between the variables selected by `BIC` model above.
+
+- The model assumptions from `BIC` model also looks better.
+
+
+```{r, warning=FALSE, message=FALSE}
+# Could we obtain the same fit using fewer variables?
+# How about stepwise selection?
+# There are 9 candidate predictors so there are 2^9 = 512
+# models. We could just fit them all.
+
+predictors <- colnames(abalone_train)[-9]
+getsubset <- function(size) combn(predictors, size, simplify = FALSE)
+allsubsets <- Reduce(c, lapply(1:length(predictors), getsubset)) # List of all possible combinations
+# Fit them all and calculate GCV
+y <- abalone_train$Rings
+n <- length(y)
+linmod_GCV <- function(mod) {
+  yhat <- predict(mod)
+  p <- ncol(model.matrix(mod))
+  # GCV score
+  mean( (y - yhat)^2 / (1 - p/n)^2 )
+}
+
+modelscores <- list()
+length(modelscores) <- length(allsubsets) + 1
+modelscores[[1]] <- list(
+  model = "Null",
+  score = linmod_GCV(lm(Rings ~ 1, data = abalone_train)) # Null model
+)
+for (j in 1:length(allsubsets)) {
+  vars <- allsubsets[[j]]
+  ff <- formula(paste("Rings ~ ", paste(vars, collapse = "+")))
+  mod <- lm(ff, data = abalone_train)
+  gcv <- linmod_GCV(mod)
+  modelscores[[j + 1]] <- list(
+    model = vars,
+    score = gcv
+  )
+}
+# Cool. Sort them.
+scores <- Reduce(c, Map("[[", modelscores, "score"))
+scoreorder <- order(scores)
+modelscores <- modelscores[scoreorder]
+modelscores[1:10]
+```
+
+
+```{r}
+
+# Which model do you choose?
+# Top scoring:
+topmodel <- lm(Rings ~ Type+ Diameter+Height+WholeWeight+ShuckedWeight+VisceraWeight+ ShellWeight, data = abalone_train)
+summary(topmodel)
+# Simplest with nearly as high a score:
+simplemodel <- lm(Rings ~ Type+ Diameter+Height+WholeWeight+ShuckedWeight+VisceraWeight, data = abalone_train)
+summary(simplemodel)
+```
+```{r}
+print(compare_rmse(topmodel,paste("top model ")))
+print(compare_rmse(simplemodel,paste("simple model ")))
+```
+```{r}
+test_model = lm(Rings~., data=abalone_test)
+X_test <- model.matrix(test_model)
+y_test <- abalone_test$Rings
+```
+
+
+
+
+```{r}
+## Ridge, with glmnet ##
+
+X <- model.matrix(abalone_add)
+glmnetridgecv <- cv.glmnet(X, y, alpha = 0)
+plot(glmnetridgecv)
+minlambda <- glmnetridgecv$lambda.min
+glmnetridge_nocv <- glmnet(X, y, alpha = 0)
+plot(glmnetridge_nocv, xvar = "lambda")
+# Which variables do you think are those top curves?
+t(glmnetridge_nocv$beta)
+
+glmnetridge_withcv <- glmnet(X, y, alpha = 0, lambda = minlambda)
+glmnetridge_withcv$beta # Coefficient estimates
+cbind(glmnetridge_withcv$beta, coef(abalone_add))
+```
+
+
+
+
+```{r}
+
+# Predict on the training data
+predictions <- predict(glmnetridge_withcv, newx = X)
+
+# Extract predicted values
+y_pred <- predictions
+
+# Calculate residuals
+residuals <- y_pred - y
+
+# Calculate RMSE
+cat("Ridge train RMSE:", sqrt(mean(residuals^2)), "\n")
+
+# Predict on the training data
+predictions <- predict(glmnetridge_withcv, newx = X_test)
+
+# Extract predicted values
+y_pred <- predictions
+
+# Calculate residuals
+residuals <- y_pred - y_test
+
+# Calculate RMSE
+cat("Ridge test RMSE:", sqrt(mean(residuals^2)), "\n")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+## LASSO, with glmnet ##
+
+glmnetlassocv <- cv.glmnet(X, y, alpha = 1)
+plot(glmnetlassocv)
+minlambda <- glmnetlassocv$lambda.min
+glmnetlasso_nocv <- glmnet(X, y, alpha = 1)
+plot(glmnetlasso_nocv, xvar = "lambda")
+# Which variables do you think that is?
+t(glmnetlasso_nocv$beta)
+# Try it with the min lambda
+glmnetlasso_withcv <- glmnet(X, y, alpha = 1, lambda = minlambda)
+glmnetlasso_withcv$beta # Coefficient estimates
+```
+
+
+```{r}
+
+# Predict on the training data
+predictions <- predict(glmnetlasso_withcv, newx = X)
+
+# Extract predicted values
+y_pred <- predictions
+
+# Calculate residuals
+residuals <- y_pred - y
+
+# Calculate RMSE
+cat("LASSO train RMSE:", sqrt(mean(residuals^2)), "\n")
+
+# Predict on the training data
+predictions <- predict(glmnetlasso_withcv, newx = X_test)
+
+# Extract predicted values
+y_pred <- predictions
+
+# Calculate residuals
+residuals <- y_pred - y_test
+
+# Calculate RMSE
+cat("LASSO test RMSE:", sqrt(mean(residuals^2)), "\n")
+
+```
+
+
+```{r}
+additive_model_1 <- gam(Rings ~ s(WholeWeight,bs="bs"), data = abalone_train)
+
+summary(additive_model_1)
+plot(additive_model_1)
+```
+
+
+
+```{r}
+pred=predict(additive_model_1,newdata=abalone_train)
+cat("training RMSE:", sqrt(mean((abalone_train$Rings - pred)^2)), "\n")
+test_pred = predict(additive_model_1,newdata=abalone_test)
+cat("testing RMSE:", sqrt(mean((abalone_test$Rings - test_pred)^2)), "\n")
+
+```
+
+```{r, warning=FALSE}
+best_additive = NULL
+best_additive_rmse = Inf
+best_additive_ff = NULL
+best_additive_train = Inf
+abalone_train_copy = abalone_train
+abalone_train_copy$Type = as.numeric(abalone_train_copy$Type)
+abalone_test_copy = abalone_test
+abalone_test_copy$Type = as.numeric(abalone_test_copy$Type)
+for (j in 1:length(allsubsets)) {
+  vars <- allsubsets[[j]]
+  ff <- formula(paste("Rings ~ ", paste("s(", vars,",bs=\"bs\")",  collapse = "+")))
+  curr_additive_model <- gam(ff, data = abalone_train_copy)
+  test_pred = predict(curr_additive_model,newdata=abalone_test_copy )
+  test_rmse = sqrt(mean((abalone_test$Rings - test_pred)^2))
+  if (test_rmse < best_additive_rmse) {
+    best_additive_ff <- ff
+    best_additive <- curr_additive_model
+    best_additive_rmse <- test_rmse
+    train_pred = predict(curr_additive_model,newdata=abalone_train_copy)
+    best_additive_train = sqrt(mean((abalone_train$Rings - train_pred)^2))
+    
+  }
+}
+```
+
+
+```{r}
+print(best_additive_ff)
+print(best_additive_rmse)
+print(best_additive_train)
+summary(best_additive)
+```
+
+
+
+Elastic net
+```{r}
+cv_10 <- trainControl(method = "cv", number = 50)
+
+enet <- train(
+  Rings ~ ., data=abalone_train,
+  method = "glmnet",
+  trControl = cv_10,
+  tuneLength = 10
+)
+
+get_best_result(enet)
+```
+
+
+```{r}
+result <- data.frame('Model'="Elastic Net","RMSE Train"=c(sqrt(mean((abalone_train$Rings-predict(enet,abalone_train))^2))),"RMSE Test"=c(sqrt(mean((abalone_test$Rings-predict(enet,abalone_test))^2))))
+
+result
+```
+
+
+```{r}
+booston_boost <- gbm(Rings ~ ., data = abalone_train, distribution = "gaussian", n.trees = 2200)
+
+boston_boost_tst_pred <- predict(booston_boost, newdata = abalone_test, n.trees = 2200)
+
+boston_boost_train_pred <- predict(booston_boost, newdata = abalone_train, n.trees = 2200)
+
+result <- data.frame('Model'="Random Forest","RMSE Train"=c(rmse(boston_boost_train_pred, abalone_train$Rings)),"RMSE Test"=c(rmse(boston_boost_tst_pred, abalone_test$Rings)))
+
+print(result)
+```
+
+```{r}
+fit = rpart(Rings~., data=abalone_train)
+
+fancyRpartPlot(pfit)
+```
+
+```{r}
+pred <- predict(pfit, abalone_train)
+cat("training RMSE:", sqrt(mean((abalone_train$Rings - pred)^2)), "\n")
+test_pred = predict(pfit, abalone_test)
+cat("testing RMSE:", sqrt(mean((abalone_test$Rings - test_pred)^2)), "\n")
+```
+```{r}
+# SVM Model 1 (SVMR1)
+svm_model1 <- svm(Rings~., data=abalone_train, kernel = "radial")
+svm_model2 <- svm(Rings~., data=abalone_train, kernel = "polynomial")
+svm_model3 <- svm(Rings~., data=abalone_train, kernel = "linear")
+svm_model4 <- svm(Rings~., data=abalone_train, kernel = "sigmoid")
+predYsvm = predict(svm_model1, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model1, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+print("------------------")
+#Predict using SVM regression
+predYsvm = predict(svm_model2, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model2, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+print("------------------")
+
+#Predict using SVM regression
+predYsvm = predict(svm_model3, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model3, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+print("------------------")
+
+#Predict using SVM regression
+predYsvm = predict(svm_model4, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model4, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+print("------------------")
+```
+
+
+
+
+```{r}
+# SVM Model 1 (SVMR1)
+svm_model1 <- svm(Rings~., data=abalone_train, kernel = "radial", gamma = 0.5, cost = 10, epsilon = 0.1)
+
+# SVM Model 2 (SVMR2)
+svm_model2 <- svm(Rings~., data=abalone_train, kernel = "radial", gamma = 1, cost = 1, epsilon = 0.1)
+
+# SVM Model 3 (SVMR3)
+svm_model3 <- svm(Rings~., data=abalone_train, kernel = "radial", gamma = 0.5, cost = 100, epsilon = 0.1)
+
+# SVM Model 4 (SVMP1)
+svm_model4 <- svm(Rings~., data=abalone_train, kernel = "polynomial", gamma = 0.5, cost = 10, epsilon = 0.1)
+
+# SVM Model 5 (SVMP2)
+svm_model5 <- svm(Rings~., data=abalone_train, kernel = "polynomial", gamma = 1, cost = 1, epsilon = 0.1)
+
+# SVM Model 6 (SVMP3)
+svm_model6 <- svm(Rings~., data=abalone_train, kernel = "polynomial", gamma = 0.5, cost = 100, epsilon = 0.1)
+```
+
+```{r}
+#Predict using SVM regression
+predYsvm = predict(svm_model1, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model1, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+
+#Predict using SVM regression
+predYsvm = predict(svm_model2, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model2, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+
+
+#Predict using SVM regression
+predYsvm = predict(svm_model3, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model3, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+
+
+#Predict using SVM regression
+predYsvm = predict(svm_model4, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model4, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+
+
+#Predict using SVM regression
+predYsvm = predict(svm_model5, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model5, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+
+
+#Predict using SVM regression
+predYsvm = predict(svm_model6, abalone_train)
+#Calculate RMSE 
+RMSEsvm_train=rmse(predYsvm,abalone_train$Rings)
+print(RMSEsvm_train)
+predYsvm_test = predict(svm_model6, abalone_test)
+RMSEsvm_train=rmse(predYsvm_test,abalone_test$Rings)
+print(RMSEsvm_train)
+```
+
+
+
+NN:
+```{r}
+train.aba <- cbind(abalone[, 2:9], class.ind(as.factor(abalone$Type)))
+scl <- function(x){ (x - min(x))/(max(x) - min(x)) }
+train.aba[, 1:8] <- data.frame(lapply(train.aba[, 1:8], scl))
+
+test.aba <- cbind(abalone_test[, 2:9], class.ind(as.factor(abalone_test$Type)))
+test.aba[, 1:8] <- data.frame(lapply(test.aba[, 1:8], scl))
+```
+
+
+```{r}
+nn <- neuralnet(Rings ~ LongestShell + Diameter + Height + WholeWeight + ShuckedWeight + VisceraWeight + ShellWeight + F + I + M,
+                data = train.aba,
+                hidden = c(4,2),
+                linear.output = TRUE)
+```
+
+
+```{r}
+par(mar = numeric(4), family = 'serif')
+plotnet(nn)
+```
+
+
+```{r}
+predicted.nn <- neuralnet::compute(nn, train.aba[-8])
+result.predicted.nn <- predicted.nn$net.result
+cat("RMSE: ", sqrt(mean((train.aba$Rings - result.predicted.nn)^2)))
+test_predict <- neuralnet::compute(nn, test.aba[-8])
+result.test_predict <- test_predict$net.result
+cat("RMSE: ", sqrt(mean((test.aba$Rings - result.test_predict)^2)))
+```
+
